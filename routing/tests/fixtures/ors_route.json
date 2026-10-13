@@ -1,0 +1,15 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[-100.0, 40.0], [-99.0, 40.0]]
+      },
+      "properties": {
+        "segments": [{"distance": 85200.0}]
+      }
+    }
+  ]
+}

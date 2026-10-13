@@ -11,9 +11,12 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 from pathlib import Path
+from dotenv import load_dotenv
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -37,6 +40,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'routing',
 ]
 
 MIDDLEWARE = [
@@ -125,3 +129,10 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+ORS_API_KEY = os.getenv('ORS_API_KEY', '')
+TANK_RANGE_MILES = 500.0
+MPG = 10.0
+CORRIDOR_MILES = 10.0
+EFFECTIVE_RANGE_MILES = TANK_RANGE_MILES - 2 * CORRIDOR_MILES
+ORS_TIMEOUT_SECONDS = 15.0

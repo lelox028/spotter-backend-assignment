@@ -23,7 +23,7 @@
 2. 'Return a map of the route along with optimal location to fuel up along the route', I decided that the map will be returned as a GeoJSON object, containing the route as a LineString and each fuel stop as a Point.
 3. For this exercise I also assumed that the vehicle will start with a full tank of fuel, and that this initial fuel is not counted in the total cost.
 4. The API that I found for routing is **OpenRouteService (ORS)**. It returns the route geometry and the total distance in a single call.
-5. The CSV doesn't include coordinates, and its addresses are mostly highway exits (not street addresses), so they can't be reliably geocoded with an address geocoder. Instead, the stations are geocoded only once (offline) using the city/state centroid taken from a public US cities dataset (<SOURCE>) and stored in the database. This way no external call is needed per station. The tradeoff is precision: a city centroid can be several miles away from the real station, so some stations that are really near the route could be left out, and others could be included without being so close. This is a known limitation, and it is compensated in decision 7. Stations whose city/state can't be matched in the dataset are discarded.
+5. The CSV doesn't include coordinates, and its addresses are mostly highway exits (not street addresses), so they can't be reliably geocoded with an address geocoder. Instead, the stations are geocoded only once (offline) using the city/state centroid taken from a public US cities dataset (GeoNames US dataset (`US.zip`, extracted as `US.txt`)) and stored in the database. This way no external call is needed per station. The tradeoff is precision: a city centroid can be several miles away from the real station, so some stations that are really near the route could be left out, and others could be included without being so close. This is a known limitation, and it is compensated in decision 7. Stations whose city/state can't be matched in the dataset are discarded.
 6. If the CSV contains the same station (same ID) more than once with different prices, only the highest price is kept. I preferred a conservative approach, so the total cost is never underestimated.
 7. Stations are only considered if they are within 10 miles of the route (the corridor distance), which is large enough to absorb part of the geocoding error. The detour to reach a station is not considered in the total cost, for the sake of completing this exercise in due time. Instead, the effective range is reduced to $500 - 2 \times \text{corridor distance} = 480$ miles. This way we know that we can always reach any station in range, even if we don't account for the extra fuel.
 
@@ -44,3 +44,77 @@
    6. If there is no station within range, the API returns an error.
 5. The total cost of fuel is the sum of (gallons bought × price at that station), where gallons = miles / 10.
 6. Once we reach the finish location, we will return the route geometry, the fuel stops (name, location, price and gallons bought) and the total cost of fuel.
+
+## Running the MVP
+
+To run and test this API, you need to create a virtual environment, install the pinned dependencies, and configure the routing key as follows:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Set ORS_API_KEY in .env. i included a .env.example file as an example of how to do this.
+python manage.py migrate
+```
+
+The station import uses the GeoNames US dataset. Download `US.zip` from
+https://download.geonames.org/export/dump/US.zip, extract `US.txt` to
+`data/cities/US.txt`, then run:
+
+```bash
+python manage.py import_stations fuel-prices-for-be-assessment.csv data/cities/US.txt
+```
+
+The command detects comma or tab delimiters, keeps the highest price per OPIS
+ID, selects the most populated city homonym, excludes Canadian province rows,
+and prints import statistics. It can safely be run again.
+
+After importing, you can verify if the database is populated:
+
+```bash
+python manage.py shell -c \
+  "from routing.models import FuelStation; print(FuelStation.objects.count())"
+```
+
+With the supplied CSV and complete GeoNames file, the result should be in the
+thousands, not a single-digit count. The importer prints a warning when fewer
+than 100 stations match, which usually means that a test or incomplete city
+dataset was supplied by mistake.
+
+## API
+
+`POST /api/route/` accepts JSON coordinates:
+
+```json
+{
+  "start": {"lat": 39.95, "lng": -75.16},
+  "finish": {"lat": 40.71, "lng": -74.01}
+}
+```
+
+The `200` response contains a GeoJSON FeatureCollection with one route
+LineString and one Point per fuel stop, plus `total_distance_miles`,
+`total_gallons`, and `total_fuel_cost`. Stop properties are
+`name`, `address`, `city`, `state`, `price_per_gallon`, `gallons_purchased`,
+`cost`, and `route_mile`. Invalid input returns `400`, an unreachable fuel gap
+returns `422`, and routing API failures return `502` or `504`; every error is
+JSON in the form `{"error": "..."}`.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/route/ \
+  -H 'Content-Type: application/json' \
+  -d '{"start":{"lat":39.95,"lng":-75.16},"finish":{"lat":40.71,"lng":-74.01}}'
+```
+
+Run tests with `python manage.py test`. The response includes an
+`X-Processing-Time-ms` header for application processing time excluding the
+external ORS request.
+
+## Known limitations
+
+Stations use city centroids rather than exact station coordinates, so corridor
+membership is approximate. The 10-mile corridor is compensated by a 480-mile
+effective range; station detour distance is not added to fuel consumption.
+ORS is called once per request and requires a valid API key. The API accepts
+only the contiguous-USA bounding box (`lat 24.5..49.5`, `lng -125.0..-66.9`).
